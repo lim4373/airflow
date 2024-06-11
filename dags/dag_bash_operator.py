@@ -19,4 +19,4 @@ with DAG(
         bash_command="echo $HOSTNAME",
     )
 
-    bash t1 >> bash t2
+    bash_t1 >> bash_t2
