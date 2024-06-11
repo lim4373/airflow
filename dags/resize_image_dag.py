@@ -1,13 +1,13 @@
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python_operator import PythonOperator
+import cv2
 import os
-from PIL import Image
 
 def resize_image(input_path, output_path, size=(224, 224)):
-    with Image.open(input_path) as img:
-        img = img.resize(size)
-        img.save(output_path)
+    img = cv2.imread(input_path)
+    resized_img = cv2.resize(img, size)
+    cv2.imwrite(output_path, resized_img)
 
 default_args = {
     'owner': 'airflow',
@@ -30,14 +30,18 @@ dag = DAG(
 def resize_task(**kwargs):
     input_path = kwargs['input_path']
     output_path = kwargs['output_path']
-    resize_image(input_path, output_path)
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+    file_name = os.path.basename(input_path)
+    output_file_path = os.path.join(output_path, f"resized_{file_name}")
+    resize_image(input_path, output_file_path)
 
 resize_image_task = PythonOperator(
     task_id='resize_image',
     python_callable=resize_task,
     op_kwargs={
-        'input_path': '/path/to/your/input/image.jpg',
-        'output_path': '/path/to/your/output/image_resized.jpg',
+        'input_path': r'C:/Users/lim78/airflow/image/성숙/crop_D0_0d4f0dab-60a5-11ec-8402-0a7404972c70.jpg',
+        'output_path': r'C:/Users/lim78/airflow/output',
     },
     dag=dag,
 )
