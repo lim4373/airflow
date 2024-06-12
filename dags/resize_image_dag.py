@@ -1,49 +1,74 @@
-from datetime import datetime, timedelta
+import airflow
 from airflow import DAG
-from airflow.operators.python_operator import PythonOperator
-import cv2
-import os
+from airflow.operators.bash import BashOperator
+from airflow.operators.python import PythonOperator
+from airflow.operators.email import EmailOperator
 
-def resize_image(input_path, output_path, size=(224, 224)):
-    img = cv2.imread(input_path)
-    resized_img = cv2.resize(img, size)
-    cv2.imwrite(output_path, resized_img)
+import pathlib # 경로를 문자열이 아닌 객체로 처리하도록 해줌
+import json
+import requests
+import requests.exceptions as requests_exceptions
 
-default_args = {
-    'owner': 'airflow',
-    'depends_on_past': False,
-    'email_on_failure': False,
-    'email_on_retry': False,
-    'retries': 1,
-    'retry_delay': timedelta(minutes=5),
-}
+ROCKET_LAUNCHES_URL = "https://ll.thespacedevs.com/2.0.0/launch/upcoming/"
+JSON_PATH = '/tmp/launches.json'
+TARGET_DIR = '/tmp/images'
 
-dag = DAG(
+def _get_pictures():
+    # Path() : Path 객체 생성
+    # mkdir() - exist_ok=True : 폴더가 없을 경우 자동으로 생성 
+    pathlib.Path(TARGET_DIR).mkdir(parents=True, exist_ok=True)
+
+    # launches.json 파일에 있는 모든 그림 파일 download
+    with open(JSON_PATH) as f:
+        try:
+            launches = json.load(f)
+            image_urls = [launch['image'] for launch in launches['results']]
+
+            for i, image_url in enumerate(image_urls):
+                try:
+                    response = requests.get(image_url)
+                    image_filename = image_url.split('/')[-1]
+                    target_file = f'{TARGET_DIR}/{image_filename}'
+
+                    with open(target_file, 'wb') as f:
+                        f.write(response.content)
+                    
+                    print(f'Downloaded {image_url} to {target_file}')
+                except requests_exceptions.MissingSchema: 
+                    print(f'{image_url} appears to be an invalid URL.')
+                except requests_exceptions.ConnectionError:
+                    print(f'Could not connect to {image_url}.')
+        except KeyError as e:
+            with open(JSON_PATH) as f:
+                print(json.load(f)) # ex : {'detail': 'Request was throttled. Expected available in 766 seconds.'}
+            raise
+
+
+with DAG(
     'resize_image_dag',
-    default_args=default_args,
-    description='A simple DAG to resize images',
-    schedule_interval=timedelta(days=1),
-    start_date=datetime(2023, 1, 1),
-    catchup=False,
-)
+    start_date = airflow.utils.dates.days_ago(14),
+    schedule_interval = None
+) as dag:
+    
+    download_eyeimage = BashOperator(
+        task_id = 'download_eyeimage',
+        bash_command = f'curl -o {JSON_PATH} -L {ROCKET_LAUNCHES_URL}'
+    )
 
-def resize_task(**kwargs):
-    input_path = kwargs['input_path']
-    output_path = kwargs['output_path']
-    if not os.path.exists(output_path):
-        os.makedirs(output_path)
-    file_name = os.path.basename(input_path)
-    output_file_path = os.path.join(output_path, f"resized_{file_name}")
-    resize_image(input_path, output_file_path)
+    resize_pictures = PythonOperator(
+        task_id = 'resize_pictures',
+        python_callable = _get_pictures
+    )
 
-resize_image_task = PythonOperator(
-    task_id='resize_image',
-    python_callable=resize_task,
-    op_kwargs={
-        'input_path': r'C:/Users/lim78/airflow/image/성숙/crop_D0_0d4f0dab-60a5-11ec-8402-0a7404972c70.jpg',
-        'output_path': r'C:/Users/lim78/airflow/output',
-    },
-    dag=dag,
-)
+    notify = EmailOperator(
+        task_id = 'send_email',
+        to = 'seonglimc36@gmail.com',
+        subject = 'Rocket Launches Data Ingestion Completed.',
+        html_content = """
+            <h2>Rocket Launches Data Ingestion Completed.</h2>
+            <br/>
+            Date : {{ ds }}
+        """
+    )
 
-resize_image_task
+    download_eyeimage >> resize_pictures >> notify

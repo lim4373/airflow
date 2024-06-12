@@ -9,14 +9,14 @@ with DAG(
     start_date=pendulum.datetime(2024, 1, 1, tz="Asia/Seoul"),
     catchup=False
 ) as dag:
-    bash_t1 = BashOperator(
-        task_id="bash_t1",
+    resize_image_dag = BashOperator(
+        task_id="resize_image_dag",
         bash_command="echo whoami",
     )
 
-    bash_t2 = BashOperator(
-        task_id="bash_t2",
+    resize_image_dag2 = BashOperator(
+        task_id="resize_image_dag2",
         bash_command="echo $HOSTNAME",
     )
 
-    bash_t1 >> bash_t2
+    resize_image_dag >> resize_image_dag2
